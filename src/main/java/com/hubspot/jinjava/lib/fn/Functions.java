@@ -144,40 +144,178 @@ public class Functions {
     return new SimpleEntry<>(key, value);
   }
 
-  @JinjavaDoc(
-    value = "return datetime of beginning of the day",
-    params = {
-      @JinjavaParam(
-        value = "timezone",
-        type = "string",
-        defaultValue = "utc",
-        desc = "timezone"
-      ),
+//  @JinjavaDoc(
+//    value = "return datetime of beginning of the day",
+//    params = {
+//      @JinjavaParam(
+//        value = "timezone",
+//        type = "string",
+//        defaultValue = "utc",
+//        desc = "timezone"
+//      ),
+//    }
+//  )
+//  public static ZonedDateTime today(String... var) {
+//    ZoneId zoneOffset = ZoneOffset.UTC;
+//    if (var.length > 0 && var[0] != null) {
+//      String timezone = var[0];
+//      try {
+//        zoneOffset = ZoneId.of(timezone);
+//      } catch (DateTimeException e) {
+//        throw new InvalidArgumentException(
+//          JinjavaInterpreter.getCurrent(),
+//          "today",
+//          String.format("Invalid timezone: %s", timezone)
+//        );
+//      }
+//    }
+//    long currentMillis = JinjavaInterpreter
+//      .getCurrentMaybe()
+//      .map(JinjavaInterpreter::getConfig)
+//      .map(JinjavaConfig::getDateTimeProvider)
+//      .map(DateTimeProvider::getCurrentTimeMillis)
+//      .orElse(System.currentTimeMillis());
+//    ZonedDateTime dateTime = getDateTimeArg(currentMillis, zoneOffset);
+//    return dateTime.toLocalDate().atStartOfDay(zoneOffset);
+//  }
+
+
+    /**
+     Enhanced today() function that maintains backward compatibility while adding day offset support
+
+     This function maintains backward compatibility with the original today() and adds:
+     - today() - returns today's date at start of day in UTC (original)
+     - today("America/New_York") - returns today's date at start of day in specified timezone (original)
+     - today(-10) - returns date 10 days ago at start of day in UTC (new)
+     - today("America/New_York", -10) - returns date 10 days ago at start of day in specified timezone (new)
+     - today("utc", 5) - returns date 5 days in the future at start of day in UTC (new)
+
+     The key difference is maintaining timezone as the FIRST parameter for backward compatibility,
+     with dayOffset as an optional SECOND parameter.
+     */
+    @JinjavaDoc(value = "return datetime of beginning of the day with optional day offset",
+        params = {
+            @JinjavaParam(value = "timezone",
+                type = "string",
+                defaultValue = "utc",
+                desc = "timezone"),
+            @JinjavaParam(value = "dayOffset",
+                type = "number",
+                defaultValue = "0",
+                desc = "number of days to add/subtract from today (negative for past, positive for "
+                        + "future)"),
+    })
+    public static ZonedDateTime today(Object... args) {
+        // Default values
+        int dayOffset = 0;
+        ZoneId zoneOffset = ZoneOffset.UTC;
+
+        // Parse arguments based on what was provided
+        if (args.length > 0 && args[0] != null) {
+            // Check if first argument is a number (for shorthand like today(-10))
+            if (args[0] instanceof Number) {
+                // Special case: today(-10) or today(5) - number as first arg means dayOffset with default UTC
+                dayOffset = ((Number) args[0]).intValue();
+                // No second argument expected in this case (timezone stays as UTC)
+            }
+            else if (args[0] instanceof String) {
+                String firstArg = (String) args[0];
+
+                // Try to parse as integer first (handles string numbers like "-10", "5")
+                try {
+                    // Special case: today("-10") or today("5") - string number as first arg means dayOffset
+                    dayOffset = Integer.parseInt(firstArg);
+                    // No second argument expected in this case (timezone stays as UTC)
+                } catch (NumberFormatException e) {
+                    // Not a number, treat it as timezone (standard case: today("America/New_York"))
+                    try {
+                        zoneOffset = ZoneId.of(firstArg);
+
+                        // Check for dayOffset as second argument
+                        if (args.length > 1 && args[1] != null) {
+                            // Second argument should be the dayOffset
+                            if (args[1] instanceof Number) {
+                                dayOffset = ((Number) args[1]).intValue();
+                            }
+                            else if (args[1] instanceof String) {
+                                try {
+                                    dayOffset = Integer.parseInt(args[1].toString());
+                                } catch (NumberFormatException ex) {
+                                    throw new InvalidArgumentException(JinjavaInterpreter.getCurrent(), "today",
+                                            String.format("Invalid dayOffset: expected number, got '%s'", args[1]));
+                                }
+                            }
+                            else {
+                                throw new InvalidArgumentException(JinjavaInterpreter.getCurrent(), "today",
+                                        String.format("Invalid dayOffset type: expected number, got %s",
+                                                args[1].getClass().getSimpleName()));
+                            }
+                        }
+                    } catch (DateTimeException ex) {
+                        throw new InvalidArgumentException(JinjavaInterpreter.getCurrent(), "today",
+                                String.format("Invalid timezone: %s", firstArg));
+                    }
+                }
+            }
+            else {
+                // Unexpected type for first argument
+                throw new InvalidArgumentException(JinjavaInterpreter.getCurrent(), "today",
+                        String.format("Invalid first argument type: expected string or number, got %s",
+                                args[0].getClass().getSimpleName()));
+            }
+        }
+
+        // Get current time from the Jinjava configuration
+        long currentMillis = JinjavaInterpreter.getCurrentMaybe().map(JinjavaInterpreter::getConfig)
+                .map(JinjavaConfig::getDateTimeProvider).map(DateTimeProvider::getCurrentTimeMillis)
+                .orElse(System.currentTimeMillis());
+
+        // Convert to ZonedDateTime using the existing helper method
+        ZonedDateTime dateTime = getDateTimeArg(currentMillis, zoneOffset);
+
+        // Get start of day in the specified timezone
+        ZonedDateTime startOfDay = dateTime.toLocalDate().atStartOfDay(zoneOffset);
+
+        // Apply day offset if specified
+        if (dayOffset != 0) {
+            startOfDay = startOfDay.plusDays(dayOffset);
+        }
+
+        return startOfDay;
     }
-  )
-  public static ZonedDateTime today(String... var) {
-    ZoneId zoneOffset = ZoneOffset.UTC;
-    if (var.length > 0 && var[0] != null) {
-      String timezone = var[0];
-      try {
-        zoneOffset = ZoneId.of(timezone);
-      } catch (DateTimeException e) {
-        throw new InvalidArgumentException(
-          JinjavaInterpreter.getCurrent(),
-          "today",
-          String.format("Invalid timezone: %s", timezone)
-        );
-      }
+
+    /**
+     String varargs version for compatibility with original implementation
+     This maintains the exact same signature as the original function
+     */
+    @JinjavaDoc(value = "return datetime of beginning of the day with optional day offset",
+            params = {@JinjavaParam(value = "timezone", type = "string", defaultValue = "utc", desc = "timezone"),
+                    @JinjavaParam(value = "dayOffset",
+                            type = "string",
+                            defaultValue = "0",
+                            desc = "number of days as string to add/subtract from today (negative for past, positive "
+                                    + "for future)"),})
+    public static ZonedDateTime today(String... var) {
+        // Convert String array to Object array and delegate to main implementation
+        if (var == null || var.length == 0) {
+            return today(new Object[0]);
+        }
+
+        Object[] args = new Object[var.length];
+        for (int i = 0; i < var.length; i++) {
+            args[i] = var[i];
+        }
+
+        return today(args);
     }
-    long currentMillis = JinjavaInterpreter
-      .getCurrentMaybe()
-      .map(JinjavaInterpreter::getConfig)
-      .map(JinjavaConfig::getDateTimeProvider)
-      .map(DateTimeProvider::getCurrentTimeMillis)
-      .orElse(System.currentTimeMillis());
-    ZonedDateTime dateTime = getDateTimeArg(currentMillis, zoneOffset);
-    return dateTime.toLocalDate().atStartOfDay(zoneOffset);
-  }
+
+    /**
+     Helper method to convert milliseconds to ZonedDateTime
+     This should match the implementation in the original Functions class
+     */
+    private static ZonedDateTime getDateTimeArg(long milliseconds, ZoneId zoneId) {
+        return ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(milliseconds), zoneId);
+    }
 
   @JinjavaDoc(
     value = "formats a date to a string",
