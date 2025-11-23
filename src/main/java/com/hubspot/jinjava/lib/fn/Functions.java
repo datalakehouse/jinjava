@@ -218,8 +218,7 @@ public class Functions {
                 dayOffset = ((Number) args[0]).intValue();
                 // No second argument expected in this case (timezone stays as UTC)
             }
-            else if (args[0] instanceof String) {
-                String firstArg = (String) args[0];
+            else if (args[0] instanceof String firstArg) {
 
                 // Try to parse as integer first (handles string numbers like "-10", "5")
                 try {
